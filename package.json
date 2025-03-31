@@ -47,3 +47,13 @@
     "vite": "^6.0.5"
   }
 }
+"scripts": {
+  "dev": "vite --host 0.0.0.0",
+  "websocket": "node server.cjs",
+  "start": "node server.cjs",
+  "build": "tsc && vite build",
+  "lint": "eslint src --fix && tsc --noEmit",
+  "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+  "preview": "vite preview"
+}
+
