@@ -27,9 +27,11 @@ RUN npm install --production
 
 # Copy built files from builder stage
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/server.cjs ./server.cjs
 
-# Expose the port
+# Expose the ports
 EXPOSE 5173
+EXPOSE 3001
 
-# Start the app
-CMD ["npm", "run", "preview"] 
+# Start both the Vite preview server and WebSocket server
+CMD ["npm", "run", "start"] 

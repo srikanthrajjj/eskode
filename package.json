@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "websocket": "node server.cjs",
-    "start": "concurrently \"npm run dev\" \"npm run websocket\"",
+    "start": "concurrently \"npm run preview\" \"npm run websocket\"",
     "build": "tsc && vite build",
     "lint": "eslint src --fix && tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "preview": "vite preview"
+    "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "idb": "^8.0.2",
