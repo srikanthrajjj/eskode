@@ -1,4 +1,4 @@
-FROM node:20-slim as builder
+FROM node:20-slim
 
 WORKDIR /app
 
@@ -8,30 +8,14 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-# Copy project files
+# Copy source files
 COPY . .
 
-# Build the app
+# Build the frontend
 RUN npm run build
 
-# Production stage
-FROM node:20-slim as production
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install production dependencies only
-RUN npm install --production
-
-# Copy built files from builder stage
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server.cjs ./server.cjs
-
-# Expose the ports
-EXPOSE 5173
+# Expose the WebSocket port
 EXPOSE 3001
 
-# Start both the Vite preview server and WebSocket server
+# Start both the frontend and WebSocket server
 CMD ["npm", "run", "start"] 

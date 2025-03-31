@@ -4,87 +4,92 @@ const { Server } = require('socket.io');
 // Create an HTTP server
 const server = http.createServer();
 
-// Create a Socket.io server
+// Create a Socket.io server with CORS configuration
 const io = new Server(server, {
   cors: {
-    origin: '*', // Allow all origins for demo purposes
-    methods: ['GET', 'POST']
-  }
+    origin: '*',  // Allow all origins in development
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket'],
+  allowEIO3: true
 });
 
-// Store connected clients
+// Store connected clients with timestamps
 const clients = {};
 
-// Store messages for debugging
+// Store messages for debugging with timestamp
 const messageHistory = [];
 
-// Initialize message count
+// Store pending messages for offline users with expiry
+const pendingMessages = {
+  'victim-michael': []
+};
+
+// Initialize message count and connection stats
 let messageCount = 0;
+let totalConnections = 0;
+let failedConnections = 0;
 
 // Handle Socket.io connections
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
+  totalConnections++;
+  console.log(`Client connected: ${socket.id} (Total: ${totalConnections})`);
   
   // Handle user registration
   socket.on('register', (data) => {
-    const { userId, userType } = data;
-    
-    console.log(`Client registered: ${userId} (${userType})`);
-    
-    // Store client info
-    clients[socket.id] = { userId, userType, socket };
-    
-    // Notify all clients about new connection
-    io.emit('message', {
-      type: 'USER_CONNECTED',
-      payload: { userId, userType },
-      senderId: userId,
-      timestamp: new Date().toISOString()
-    });
+    try {
+      const { userId, userType } = data;
+      console.log(`Client registered: ${userId} (${userType})`);
+      
+      // Store client info with timestamp
+      clients[socket.id] = { 
+        userId, 
+        userType, 
+        socket,
+        connectedAt: new Date().toISOString()
+      };
+      
+      // If this is the victim connecting, send any pending messages
+      if (userId === 'victim-michael' && pendingMessages[userId]?.length > 0) {
+        console.log(`Sending ${pendingMessages[userId].length} pending messages to victim`);
+        pendingMessages[userId].forEach(message => {
+          socket.emit('message', message);
+        });
+        // Clear pending messages after sending
+        pendingMessages[userId] = [];
+      }
+      
+      // Notify all clients about new connection
+      io.emit('message', {
+        type: 'USER_CONNECTED',
+        payload: { userId, userType },
+        senderId: userId,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error in register:', error);
+      failedConnections++;
+    }
+  });
+  
+  // Handle ping to keep connection alive
+  socket.on('ping', () => {
+    socket.emit('pong');
+  });
+
+  // Handle errors
+  socket.on('error', (error) => {
+    console.error(`Socket error for ${socket.id}:`, error);
+    failedConnections++;
   });
   
   // Handle messages
   socket.on('message', (message) => {
     try {
-      // Message is already an object, no need to parse
       console.log(`Received message from ${socket.id}:`, message);
-      
-      // Handle registration message
-      if (message.type === 'REGISTER') {
-        const { userId, userType } = message;
-        socket.userId = userId;
-        socket.userType = userType;
-        console.log(`Client registered: ${userId} (${userType})`);
-        return;
-      }
-      
-      // Handle case request message
-      if (message.type === 'REQUEST_CASES') {
-        console.log(`Handling case request for victim: ${message.payload.victimId}`);
-        
-        // In a real application, you would fetch cases from a database
-        // For now, we'll send back the cases that were previously added
-        const victimCases = messageHistory
-          .filter(msg => msg.type === 'NEW_CASE_ADDED' && msg.payload.victimName === 'MICHAEL PARKER')
-          .map(msg => ({
-            id: msg.payload.id,
-            crimeNumber: msg.payload.crimeNumber,
-            crimeType: msg.payload.crimeType,
-            officerName: msg.payload.officerName,
-            timestamp: msg.payload.timestamp
-          }));
-        
-        console.log(`Sending ${victimCases.length} cases to victim:`, victimCases);
-        
-        // Send the case list back to the requesting victim
-        socket.emit('message', {
-          type: 'CASE_LIST',
-          payload: {
-            cases: victimCases
-          }
-        });
-        return;
-      }
       
       // Store message for debugging
       messageHistory.push({
@@ -102,14 +107,64 @@ io.on('connection', (socket) => {
         
         if (victimSocket) {
           console.log('Sending new case to victim:', message);
+          victimSocket.socket.emit('message', message);
+        } else {
+          console.log('Victim offline, storing message for later delivery');
+          pendingMessages['victim-michael'].push(message);
+        }
+      } else if (message.type === 'POLICE_TO_VICTIM_MESSAGE') {
+        // Find the victim's socket
+        const victimSocket = Object.values(clients).find(
+          client => client.userId === 'victim-michael'
+        );
+        
+        if (victimSocket) {
+          console.log('Sending police message to victim:', message);
           victimSocket.socket.emit('message', {
-            type: 'NEW_CASE_ADDED',
-            payload: message.payload,
+            ...message,
             senderId: socket.userId,
             timestamp: new Date().toISOString()
           });
         } else {
-          console.log('Victim socket not found');
+          console.log('Victim offline, storing message for later delivery');
+          pendingMessages['victim-michael'].push({
+            ...message,
+            senderId: socket.userId,
+            timestamp: new Date().toISOString()
+          });
+        }
+      } else if (message.type === 'VICTIM_MESSAGE') {
+        // Find the police officer's socket
+        const policeSocket = Object.values(clients).find(
+          client => client.userId === 'off1'
+        );
+        
+        if (policeSocket) {
+          console.log('Sending victim message to police:', message);
+          policeSocket.socket.emit('message', {
+            ...message,
+            senderId: socket.userId,
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          console.log('Police socket not found');
+        }
+      } else if (message.type === 'MESSAGE_READ') {
+        // Handle read receipts
+        const recipientId = message.payload.recipientId;
+        const recipientSocket = Object.values(clients).find(
+          client => client.userId === recipientId
+        );
+        
+        if (recipientSocket) {
+          console.log('Sending read receipt:', message);
+          recipientSocket.socket.emit('message', {
+            ...message,
+            senderId: socket.userId,
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          console.log('Recipient socket not found');
         }
       } else {
         // For other messages, broadcast to all
@@ -146,31 +201,37 @@ io.on('connection', (socket) => {
       delete clients[socket.id];
     }
   });
-  
-  // Debug endpoint to get all messages
-  socket.on('get_message_history', () => {
-    socket.emit('message_history', messageHistory);
-  });
-  
-  // Debug endpoint to get connected clients
-  socket.on('get_clients', () => {
-    const clientList = Object.keys(clients).map(id => ({
-      socketId: id,
-      userId: clients[id].userId,
-      userType: clients[id].userType
-    }));
-    socket.emit('client_list', clientList);
-  });
 });
 
-// Start the server
+// Start the server with error handling
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`WebSocket server running on port ${PORT}`);
+const HOST = '0.0.0.0';  // Listen on all network interfaces
+
+server.on('error', (error) => {
+  console.error('Server error:', error);
+  if (error.code === 'EADDRINUSE') {
+    console.log(`Port ${PORT} is in use, trying to close existing connection...`);
+    require('child_process').exec(`npx kill-port ${PORT}`, (err) => {
+      if (err) {
+        console.error('Failed to kill port:', err);
+      } else {
+        console.log(`Port ${PORT} freed, restarting server...`);
+        startServer();
+      }
+    });
+  }
 });
+
+function startServer() {
+  server.listen(PORT, HOST, () => {
+    console.log(`WebSocket server running on ${HOST}:${PORT}`);
+  });
+}
+
+startServer();
 
 // Log server statistics every 30 seconds
 setInterval(() => {
   const connectedClients = Object.keys(clients).length;
-  console.log(`[SERVER STATS] Connected clients: ${connectedClients}, Messages: ${messageCount}`);
+  console.log(`[SERVER STATS] Connected clients: ${connectedClients}, Total connections: ${totalConnections}, Failed: ${failedConnections}, Messages: ${messageCount}`);
 }, 30000); 
