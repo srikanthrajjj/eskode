@@ -28,21 +28,44 @@ export interface WebSocketMessage {
 export type MessageCallback = (message: WebSocketMessage) => void;
 
 // Frontend application URLs
-const FRONTEND_LOCAL = 'http://localhost:5173';
-const FRONTEND_REMOTE = 'http://192.168.0.105:5173';
+const FRONTEND_URLS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://192.168.56.1:5173',
+  'http://192.168.41.1:5173',
+  'http://192.168.0.106:5173',
+  'http://192.168.56.1:5174',
+  'http://192.168.41.1:5174',
+  'http://192.168.0.106:5174'
+];
 
-// WebSocket server URLs
-const SOCKET_SERVER_URL = import.meta.env.VITE_WS_URL || 'http://localhost:3001';
+// Get WebSocket URL based on current hostname
+const getWebSocketURL = () => {
+  const hostname = window.location.hostname;
+  const port = '3001';
+  if (hostname === 'localhost') {
+    return `http://localhost:${port}`;
+  }
+  // For network connections, use the IP address
+  return `http://${hostname}:${port}`;
+};
+
+const SOCKET_SERVER_URL = import.meta.env.VITE_WS_URL || getWebSocketURL();
 
 console.log('Using WebSocket server URL:', SOCKET_SERVER_URL);
-console.log('Frontend URL:', window.location.hostname === 'localhost' ? FRONTEND_LOCAL : FRONTEND_REMOTE);
+console.log('Current frontend URL:', window.location.href);
 
 // Socket.io connection options
 const SOCKET_OPTIONS = {
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
   reconnectionDelayMax: 5000,
-  timeout: 20000
+  timeout: 20000,
+  transports: ['websocket'],
+  withCredentials: true,
+  forceNew: true,
+  autoConnect: true,
+  reconnection: true
 };
 
 class WebSocketService {
@@ -60,10 +83,11 @@ class WebSocketService {
   // Initialize WebSocket connection
   public connect(userId: string, userType: 'admin' | 'officer' | 'victim'): void {
     this.userId = userId;
-    this.userType = userType as any;
+    this.userType = userType;
     this.connectionAttempts = 0;
 
     console.log(`Connecting to WebSocket server as ${userType} with ID: ${userId}`);
+    console.log('WebSocket URL:', SOCKET_SERVER_URL);
     
     // Close existing socket if any
     if (this.socket) {
@@ -72,7 +96,7 @@ class WebSocketService {
     }
     
     try {
-      // Connect to Socket.io server
+      // Connect to Socket.io server with options
       this.socket = io(SOCKET_SERVER_URL, SOCKET_OPTIONS);
       
       // Setup event listeners
@@ -80,6 +104,7 @@ class WebSocketService {
       this.socket.on('message', this.processMessage.bind(this));
       this.socket.on('disconnect', this.handleDisconnect.bind(this));
       this.socket.on('connect_error', this.handleConnectionError.bind(this));
+      this.socket.on('error', this.handleConnectionError.bind(this));
     } catch (error) {
       console.error('Error connecting to WebSocket server:', error);
       this.handleConnectionError(error);

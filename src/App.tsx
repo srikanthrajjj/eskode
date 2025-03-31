@@ -328,9 +328,9 @@ function App() {
         // Handle victim message
         console.log('Processing VICTIM_MESSAGE with payload:', message.payload);
         // Check if this message is intended for current user (if recipientId is specified)
-        if (!message.payload.recipientId || 
+        if (!message.payload?.recipientId || 
             message.payload.recipientId === 'off1' || 
-            message.payload.recipientId.startsWith('off')) {
+            (message.payload.recipientId && message.payload.recipientId.startsWith('off'))) {
           handleIncomingVictimMessage(message.payload);
         } else {
           console.log('Ignoring VICTIM_MESSAGE - not addressed to current user');
@@ -342,22 +342,22 @@ function App() {
         console.log('Processing TYPING_INDICATOR with payload:', message.payload);
         
         // Check if we should handle this typing indicator based on sender
-        if (message.senderId.startsWith('admin')) {
+        if (message.senderId?.startsWith('admin')) {
           // Admin is typing, update state for officer view
-          setIsOfficerTyping(message.payload.isTyping);
+          setIsOfficerTyping(message.payload?.isTyping);
         } 
-        else if (message.senderId.startsWith('victim')) {
+        else if (message.senderId?.startsWith('victim')) {
           // Only handle if we're in police view and viewing the relevant case
-          if (currentView === 'police' && message.payload.recipientId === 'off1') {
-            console.log('Victim is typing:', message.payload.isTyping);
+          if (currentView === 'police' && message.payload?.recipientId === 'off1') {
+            console.log('Victim is typing:', message.payload?.isTyping);
             // Update victim typing state here if needed
             // You might need to add a state for victim typing indicators
           }
         }
-        else if (message.senderId.startsWith('off')) {
+        else if (message.senderId?.startsWith('off')) {
           // Officer is typing, update state for admin or victim view
           if (currentView === 'victim') {
-            setIsOfficerTyping(message.payload.isTyping);
+            setIsOfficerTyping(message.payload?.isTyping);
           }
         }
         break;
@@ -916,16 +916,19 @@ function App() {
   // Modify the handleSubmitNewCase function
   const handleSubmitNewCase = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const crimeNumberInput = e.currentTarget.elements.namedItem('crimeNumber') as HTMLInputElement;
-    const crimeNumber = crimeNumberInput.value;
+    const crimeNumber = crimeNumberInput;
 
     if (!crimeNumber.trim()) {
       alert('Please enter a crime number');
       return;
     }
 
-    // Create a new case
-    const newCase: Case = {
+    // Create a new case using matching case data if available
+    const newCase: Case = matchingCase ? {
+      ...matchingCase,
+      id: `case${cases.length + 1}`,
+      hasNotifications: false
+    } : {
       id: `case${cases.length + 1}`,
       victimName: 'MICHAEL PARKER',
       dateOfBirth: '12/04/1985',
@@ -958,11 +961,13 @@ function App() {
     console.log('Sending new case message:', newCasePayload);
     websocketService.sendMessage('NEW_CASE_ADDED', newCasePayload);
 
-    // Close modal after 2 seconds
+    // Reset state and close modal after 2 seconds
     setTimeout(() => {
       setShowAddCaseModal(false);
       setShowSuccessMessage(false);
       setSuccessMessage('');
+      setCrimeNumberInput('');
+      setMatchingCase(null);
     }, 2000);
   };
 
@@ -1267,6 +1272,10 @@ function App() {
     setOpenMenuId(null);
   };
 
+  // Add new state for case details
+  const [matchingCase, setMatchingCase] = useState<Case | null>(null);
+  const [crimeNumberInput, setCrimeNumberInput] = useState('');
+
   // Render the appropriate view based on current state
   if (currentView === 'splash') {
     return (
@@ -1338,11 +1347,32 @@ function App() {
                     type="text"
                     placeholder="Enter crime number (e.g. CRI45678/23)"
                     required
+                    value={crimeNumberInput}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCrimeNumberInput(value);
+                      // Find matching case from dummyCases
+                      const match = dummyCases.find(c => c.crimeNumber.toLowerCase() === value.toLowerCase());
+                      setMatchingCase(match || null);
+                    }}
                     className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                     disabled={showSuccessMessage}
                   />
                 </div>
-                
+
+                {/* Show matching case details if found */}
+                {matchingCase && (
+                  <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+                    <h3 className="font-bold text-blue-800 mb-2">Case Details Found:</h3>
+                    <div className="space-y-2 text-sm">
+                      <p><span className="font-semibold">Victim Name:</span> {matchingCase.victimName}</p>
+                      <p><span className="font-semibold">Date of Birth:</span> {matchingCase.dateOfBirth}</p>
+                      <p><span className="font-semibold">Address:</span> {matchingCase.address}</p>
+                      <p><span className="font-semibold">Crime Type:</span> {matchingCase.crimeType}</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Success Message */}
                 {showSuccessMessage && (
                   <div className="mb-4 p-4 bg-green-50 rounded-lg flex items-center justify-center space-x-2">
@@ -1356,7 +1386,11 @@ function App() {
                 <div className="flex justify-end space-x-3">
                   <button
                     type="button"
-                    onClick={() => setShowAddCaseModal(false)}
+                    onClick={() => {
+                      setShowAddCaseModal(false);
+                      setCrimeNumberInput('');
+                      setMatchingCase(null);
+                    }}
                     className="px-4 py-2 text-gray-600 hover:text-gray-800"
                     disabled={showSuccessMessage}
                   >
@@ -2243,10 +2277,31 @@ function App() {
                   type="text"
                   placeholder="Enter crime number (e.g. CRI45678/23)"
                   required
+                  value={crimeNumberInput}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setCrimeNumberInput(value);
+                    // Find matching case from dummyCases
+                    const match = dummyCases.find(c => c.crimeNumber.toLowerCase() === value.toLowerCase());
+                    setMatchingCase(match || null);
+                  }}
                   className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
                   disabled={showSuccessMessage}
                 />
               </div>
+
+              {/* Show matching case details if found */}
+              {matchingCase && (
+                <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+                  <h3 className="font-bold text-blue-800 mb-2">Case Details Found:</h3>
+                  <div className="space-y-2 text-sm">
+                    <p><span className="font-semibold">Victim Name:</span> {matchingCase.victimName}</p>
+                    <p><span className="font-semibold">Date of Birth:</span> {matchingCase.dateOfBirth}</p>
+                    <p><span className="font-semibold">Address:</span> {matchingCase.address}</p>
+                    <p><span className="font-semibold">Crime Type:</span> {matchingCase.crimeType}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Success Message */}
               {showSuccessMessage && (
@@ -2261,7 +2316,11 @@ function App() {
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
-                  onClick={() => setShowAddCaseModal(false)}
+                  onClick={() => {
+                    setShowAddCaseModal(false);
+                    setCrimeNumberInput('');
+                    setMatchingCase(null);
+                  }}
                   className="px-4 py-2 text-gray-600 hover:text-gray-800"
                   disabled={showSuccessMessage}
                 >

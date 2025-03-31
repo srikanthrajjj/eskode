@@ -221,6 +221,8 @@ const VictimApp = ({ onBack }: VictimAppProps) => {
   const [showCrimeSummaryModal, setShowCrimeSummaryModal] = useState(false);
   const [selectedCrime, setSelectedCrime] = useState<Case | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -466,35 +468,44 @@ const VictimApp = ({ onBack }: VictimAppProps) => {
   // Handle sending a message
   const handleSendMessage = () => {
     if (newMessage.trim()) {
-      const messageToSend = newMessage.trim();
-      const messageId = Date.now().toString();
-      
-      console.log('Sending message:', messageToSend);
-      
-      // Create the message object
       const newMsg: VictimMessage = {
-        id: messageId,
-        sender: 'victim' as 'victim',
+        id: Date.now().toString(),
+        sender: 'victim',
         senderName: 'Michael Parker',
-        message: messageToSend,
+        message: newMessage.trim(),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         read: false
       };
       
-      // Update local state
+      // Add to local state first
       setMessages(prev => [...prev, newMsg]);
       
-      // Clear input
+      // Send message through WebSocket
+      websocketService.sendMessage('VICTIM_MESSAGE', {
+        id: newMsg.id,
+        sender: newMsg.sender,
+        senderName: newMsg.senderName,
+        message: newMsg.message,
+        timestamp: newMsg.timestamp,
+        read: newMsg.read,
+        recipientId: 'off1',
+        caseId: activeCase?.id
+      });
+      
       setNewMessage('');
       
-      // Send via websocket
-      websocketService.sendMessage('VICTIM_MESSAGE', {
-        ...newMsg,
-        caseId: activeCase?.id || 'case1',
-        recipientId: 'off1'
-      });
-
-      // Focus input after sending
+      // Reset typing indicator when sending a message
+      if (isTyping) {
+        setIsTyping(false);
+        websocketService.sendTypingIndicator(false);
+        
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = null;
+        }
+      }
+      
+      // Focus the input after sending
       inputRef.current?.focus();
     }
   };
